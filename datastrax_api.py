@@ -43,9 +43,9 @@ class DataStraxApi:
         self.session.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {KEYSPACE}.{TABLES['budgets']} (
-                    username text PRIMARY KEY,
-                    firstname text,
-                    lastname text
+                    itemid text PRIMARY KEY,
+                    purchases text,
+                    total float
                 );
             """
         )
@@ -113,6 +113,17 @@ class DataStraxApi:
         prepared = self.session.prepare(f"DELETE FROM {TABLES['users']} WHERE username = ?")
         self.session.execute(prepared, [username])
         log_event('Delete {username', module=MODULE)
+
+    @staticmethod
+    def itemid(date_string, item_name):
+        if '-' not in date_string:
+            return None
+        return f'{date_string}:{item_name}'
+    
+    @staticmethod
+    def parse_itemid(itemid):
+        pass
+        
 
 def main():
     users = {
