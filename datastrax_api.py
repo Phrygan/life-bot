@@ -1,10 +1,11 @@
-from cassandra.cluster import Cluster
-from cassandra.auth import PlainTextAuthProvider
-
 from util import log_event
 
 import config
 
+from cassandra.cluster import Cluster
+from cassandra.auth import PlainTextAuthProvider
+
+from datetime import datetime
 import os
 
 MODULE = os.path.basename(__file__)[:-3]
@@ -44,8 +45,8 @@ class DataStraxApi:
             f"""
             CREATE TABLE IF NOT EXISTS {KEYSPACE}.{TABLES['budgets']} (
                     itemid text PRIMARY KEY,
-                    purchases text,
-                    total float
+                    total float,
+                    purchases text
                 );
             """
         )
@@ -63,7 +64,7 @@ class DataStraxApi:
         self.session.execute(
             f"INSERT INTO {TABLES['users']} (username, firstname, lastname) VALUES (%s, %s, %s)",  [username, firstname, lastname]
         )
-        log_event(f'Inserted (username: {username}, firstname: {firstname}, lastname: {lastname}', module=MODULE)
+        log_event(f'Inserted User (username: {username}, firstname: {firstname}, lastname: {lastname}', module=MODULE)
 
     def get_user(self, username: str=None):
         """
@@ -95,13 +96,13 @@ class DataStraxApi:
                 f"UPDATE {TABLES['users']} SET firstname=? WHERE username=?"
             )
             self.session.execute(prepared, [firstname, username])
-            log_event(f'updated username (firstname: {firstname}', module=MODULE)
+            log_event(f'updated user {username} (firstname: {firstname}', module=MODULE)
         if lastname:
             prepared = self.session.prepare(
                 f"UPDATE {TABLES['users']} SET lastname=? WHERE username=?"
             )
             self.session.execute(prepared, [lastname, username])
-            log_event(f'updated username (lastname: {lastname})', module=MODULE)
+            log_event(f'updated user {username} (lastname: {lastname})', module=MODULE)
 
     def delete_user(self, username: str):
         """
@@ -112,18 +113,100 @@ class DataStraxApi:
         """
         prepared = self.session.prepare(f"DELETE FROM {TABLES['users']} WHERE username = ?")
         self.session.execute(prepared, [username])
-        log_event('Delete {username', module=MODULE)
+        log_event('Deleted {username}', module=MODULE)
 
     @staticmethod
-    def itemid(date_string, item_name):
-        if '-' not in date_string:
-            return None
-        return f'{date_string}:{item_name}'
+    def itemid(date: datetime, item_name: str):
+        """
+        Convet datetime object and string to itemid
+
+        Args:
+            date (datetime): Datetime accurate to month
+            item_name (str): Name of Item
+
+        Returns:
+            itemid (str): itemid
+        """
+        return f'{date.month}-{date.year}:{item_name}'
     
     @staticmethod
-    def parse_itemid(itemid):
-        pass
-        
+    def parse_itemid(itemid: str):
+        """
+        Convert itemid to datetime object and name string.
+
+        Args:
+            itemid (str): itemid
+
+        Returns:
+            tuple: datetime object accurate to month and item name.
+        """
+        if '-' not in itemid or ':' not in itemid:
+            return None
+        date_string, item_name = itemid.split(':')
+        month, year = date_string.split('-')
+        return datetime(int(year), int(month), 1), item_name
+
+    def insert_item(self, itemid: str, total: float, purchases: str):
+        """
+        Insert new item to database. Update item in database.
+
+        Args:
+            itemid (str): ID of item.
+            total (float): Total spending money.
+            purchases (str): JSON string of purchases.
+        """
+        self.session.execute(
+            f"INSERT INTO {TABLES['budgets']} (itemid, total, purchases) VALUES (%s, %s, %s)",  [itemid, total, purchases]
+        )
+        log_event(f'Inserted item (itemid: {itemid}, total: {total}, purchases: {purchases}', module=MODULE)
+    
+    def get_item(self, itemid: str=None):
+        """
+        Get item with itemid. Otherwise, get all item.
+
+        Args:
+            itemid (str, optional): id of item. Defaults to None.
+
+        Returns:
+            namedTuple: Data accessed
+            iterable: Data accessed
+        """
+        if itemid:
+            return self.session.execute(f"SELECT * FROM {TABLES['budgets']} WHERE itemid=%s", [itemid]).one()
+        return self.session.execute(f"SELECT * FROM {TABLES['budgets']}")
+
+    def update_item(self, itemid, total: float=-1, purchases: str=None):
+        """
+        Update data for item with itemid.
+
+        Args:
+            itemid (str): itemid of item to update.
+            total (flat, optional): New total of item. Defaults to None.
+            purchases (str, optional): New purchases of item. Defaults to None.
+        """
+        if total > -1:
+            prepared = self.session.prepare(
+                f"UPDATE {TABLES['budgets']} SET total=? WHERE itemid=?"
+            )
+            self.session.execute(prepared, [total, itemid])
+            log_event(f'updated item {itemid} (firstname: {firstname}', module=MODULE)
+        if purchases:
+            prepared = self.session.prepare(
+                f"UPDATE {TABLES['budgets']} SET purchases=? WHERE itemid=?"
+            )
+            self.session.execute(prepared, [lastname, username])
+            log_event(f'updated item {itemid} (total: {total})', module=MODULE)
+    
+    def delete_user(self, itemid: str):
+        """
+        Delete item with itemid.
+
+        Args:
+            itemid (str): itemid of item to delete.
+        """
+        prepared = self.session.prepare(f"DELETE FROM {TABLES['budgets']} WHERE itemid = ?")
+        self.session.execute(prepared, [itemid])
+        log_event('Deleted {itemid}', module=MODULE)
 
 def main():
     users = {
@@ -133,8 +216,6 @@ def main():
     db_api = DataStraxApi()
     db_api.update_user('neiphu', 'andrew', users['neiphu']['lastname'])
     print(db_api.get_user()[0])
-
-
 
 if __name__ == '__main__':
     main()
