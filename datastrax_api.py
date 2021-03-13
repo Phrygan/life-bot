@@ -11,9 +11,21 @@ import os
 MODULE = os.path.basename(__file__)[:-3]
 
 KEYSPACE = 'users'
-TABLES = {
+TABLE_NAMES = {
     'users': 'users',
     'budgets': 'budgets'
+}
+TABLE_FORMAT = {
+    TABLE_NAMES['users']: [
+        'username',
+        'firstname',
+        'lastname'
+    ],
+    TABLE_NAMES['budgets']: [
+        'itemid',
+        'total',
+        'purchases'
+    ]
 }
 
 class DataStraxApi:
@@ -34,7 +46,7 @@ class DataStraxApi:
         # create tables if not there
         self.session.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {KEYSPACE}.{TABLES['users']} (
+            CREATE TABLE IF NOT EXISTS {KEYSPACE}.{TABLE_NAMES['users']} (
                     username text PRIMARY KEY,
                     firstname text,
                     lastname text
@@ -43,7 +55,7 @@ class DataStraxApi:
         )
         self.session.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {KEYSPACE}.{TABLES['budgets']} (
+            CREATE TABLE IF NOT EXISTS {KEYSPACE}.{TABLE_NAMES['budgets']} (
                     itemid text PRIMARY KEY,
                     total float,
                     purchases text
@@ -52,68 +64,56 @@ class DataStraxApi:
         )
         log_event('Loaded users and budgets tables', module=MODULE)
 
-    def insert_user(self, username: str, firstname: str, lastname: str):
+    def insert(self, table: str, primary_key: str, data):
         """
-        Insert new user to database. Update user in database.
+        Insert data into table.
 
         Args:
-            username (str): Username of user.
-            firstname (str): User's first name.
-            lastname (str): User's lastname.
-        """
-        self.session.execute(
-            f"INSERT INTO {TABLES['users']} (username, firstname, lastname) VALUES (%s, %s, %s)",  [username, firstname, lastname]
-        )
-        log_event(f'Inserted User (username: {username}, firstname: {firstname}, lastname: {lastname}', module=MODULE)
-
-    def get_user(self, username: str=None):
-        """
-        Get user with username. Otherwise, get all users.
-
-        Args:
-            username (str, optional): username of user. Defaults to None.
+            table (str): name of table to insert to.
+            primary_key (str): Primary Key of data.
+            data (dict): Data to insert.
 
         Returns:
-            namedTuple: Data accessed
-            iterable: Data accessed
+            ResultSet: Response of execution of insertion.
         """
-        if username:
-            return self.session.execute(f"SELECT * FROM {TABLES['users']} WHERE username=%s", [username]).one()
-        return self.session.execute(f"SELECT * FROM {TABLES['users']}")
+        response = self.session.execute(
+            f"INSERT INTO {TABLE_NAMES[table]} ({', '.join(data)}) VALUES ({'%s, ' * 2 + '%s'})", list(data.values())
+        )
+        updated_data_string = ', '.join(f'{name}: {value}' for name, value in data.items())
+        log_event(f"Inserted {table[:-1]} ({updated_data_string})", module=MODULE)
+        return response
 
-
-    def update_user(self, username, firstname: str=None, lastname: str=None):
+    def get(self, table: str, primary_key: str=None):
         """
-        Update data for user with username.
-
-        Args:
-            username (str): username of user to update.
-            firstname (str, optional): New firstname of user. Defaults to None.
-            lastname (str, optional): New lastname of user. Defaults to None.
-        """
-        if firstname:
-            prepared = self.session.prepare(
-                f"UPDATE {TABLES['users']} SET firstname=? WHERE username=?"
-            )
-            self.session.execute(prepared, [firstname, username])
-            log_event(f'updated user {username} (firstname: {firstname}', module=MODULE)
-        if lastname:
-            prepared = self.session.prepare(
-                f"UPDATE {TABLES['users']} SET lastname=? WHERE username=?"
-            )
-            self.session.execute(prepared, [lastname, username])
-            log_event(f'updated user {username} (lastname: {lastname})', module=MODULE)
-
-    def delete_user(self, username: str):
-        """
-        Delete user with username.
+        Access data with primary key, or access all data
 
         Args:
-            username (str): Username of user to delete.
+            primary_key (str, optional): Primary key of data to access. Defaults to None.
+            table (str): Name of table to access.
+
+        Returns:
+            Row (namedTuple): Data accessed
+            ResultSet: Data accessed
         """
-        prepared = self.session.prepare(f"DELETE FROM {TABLES['users']} WHERE username = ?")
-        self.session.execute(prepared, [username])
-        log_event('Deleted {username}', module=MODULE)
+        if primary_key:
+            return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]} WHERE {TABLE_FORMAT[table][0]}=%s", [primary_key]).one()
+        return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]}")
+    
+    def delete(self, table: str, primary_key: str):
+        """
+        Delete row with primary key.
+
+        Args:
+            table (str): Name of table to change.
+            primary_key (str): Primary key of row to delete.
+
+        Returns:
+            ResultSet: Response of execution of deletion.
+        """
+        prepared = self.session.prepare(f"DELETE FROM {TABLE_NAMES['users']} WHERE {TABLE_FORMAT[table][0]}=?")
+        response = self.session.execute(prepared, [primary_key])
+        log_event(f"Deleted {TABLE_FORMAT[table][0]}: {primary_key}", module=MODULE)
+        return response
 
     @staticmethod
     def itemid(date: datetime, item_name: str):
@@ -146,76 +146,19 @@ class DataStraxApi:
         month, year = date_string.split('-')
         return datetime(int(year), int(month), 1), item_name
 
-    def insert_item(self, itemid: str, total: float, purchases: str):
-        """
-        Insert new item to database. Update item in database.
-
-        Args:
-            itemid (str): ID of item.
-            total (float): Total spending money.
-            purchases (str): JSON string of purchases.
-        """
-        self.session.execute(
-            f"INSERT INTO {TABLES['budgets']} (itemid, total, purchases) VALUES (%s, %s, %s)",  [itemid, total, purchases]
-        )
-        log_event(f'Inserted item (itemid: {itemid}, total: {total}, purchases: {purchases}', module=MODULE)
-    
-    def get_item(self, itemid: str=None):
-        """
-        Get item with itemid. Otherwise, get all item.
-
-        Args:
-            itemid (str, optional): id of item. Defaults to None.
-
-        Returns:
-            namedTuple: Data accessed
-            iterable: Data accessed
-        """
-        if itemid:
-            return self.session.execute(f"SELECT * FROM {TABLES['budgets']} WHERE itemid=%s", [itemid]).one()
-        return self.session.execute(f"SELECT * FROM {TABLES['budgets']}")
-
-    def update_item(self, itemid, total: float=-1, purchases: str=None):
-        """
-        Update data for item with itemid.
-
-        Args:
-            itemid (str): itemid of item to update.
-            total (flat, optional): New total of item. Defaults to None.
-            purchases (str, optional): New purchases of item. Defaults to None.
-        """
-        if total > -1:
-            prepared = self.session.prepare(
-                f"UPDATE {TABLES['budgets']} SET total=? WHERE itemid=?"
-            )
-            self.session.execute(prepared, [total, itemid])
-            log_event(f'updated item {itemid} (firstname: {firstname}', module=MODULE)
-        if purchases:
-            prepared = self.session.prepare(
-                f"UPDATE {TABLES['budgets']} SET purchases=? WHERE itemid=?"
-            )
-            self.session.execute(prepared, [lastname, username])
-            log_event(f'updated item {itemid} (total: {total})', module=MODULE)
-    
-    def delete_user(self, itemid: str):
-        """
-        Delete item with itemid.
-
-        Args:
-            itemid (str): itemid of item to delete.
-        """
-        prepared = self.session.prepare(f"DELETE FROM {TABLES['budgets']} WHERE itemid = ?")
-        self.session.execute(prepared, [itemid])
-        log_event('Deleted {itemid}', module=MODULE)
-
 def main():
     users = {
         'lougene': {'firstname': 'eugene', 'lastname': 'hong'},
         'neiphu': {'firstname': 'andrew', 'lastname': 'hong'}
     }
     db_api = DataStraxApi()
-    db_api.update_user('neiphu', 'andrew', users['neiphu']['lastname'])
-    print(db_api.get_user()[0])
+    insert_response = db_api.insert(TABLE_NAMES['users'], 'neiphu', {'username': 'neiphu', 'firstname': users['neiphu']['firstname'], 'lastname': users['neiphu']['lastname']})
+    db_api.insert(TABLE_NAMES['users'], 'lougene', {'username': 'lougene', 'firstname': users['lougene']['firstname'], 'lastname': users['lougene']['lastname']})
+    get_response = db_api.get(TABLE_NAMES['users'], primary_key='lougene')
+    delete_response = db_api.delete(TABLE_NAMES['users'], 'lougene')
+    get_all_response = db_api.get(TABLE_NAMES['users'])
+    print(f"insert response ({type(insert_response)}): {insert_response}\nget response ({type(get_response)}): {get_response}\n"
+    f"delete response({type(delete_response)}): {delete_response}\nget all response ({type(get_all_response)}): {get_all_response}")
 
 if __name__ == '__main__':
     main()
